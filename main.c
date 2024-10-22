@@ -6,101 +6,100 @@
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
 
-static Mesh GenerateMesh(float radius, float scale, float lacunarity, float gain, int octaves)
+static Color heightToColor(float noise)
 {
-    const int longitudeCount = 50;
-    const int latitudeCount = 50;
+    if (noise > 0.45)
+        return DARKGRAY;
 
+    if (noise > 0.25)
+        return DARKBROWN;
+
+    if (noise > 0)
+        return BROWN;
+
+    if (noise > -0.2)
+        return SKYBLUE;
+
+    return DARKBLUE;
+}
+
+static Mesh GenerateMesh(int longitudeSlices, int latitudeSlices, float radius, float scale, float lacunarity, float gain, int octaves)
+{
     Mesh mesh = { 0 };
-    mesh.triangleCount = longitudeCount * (latitudeCount - 1) * 2;
-    mesh.vertexCount = (longitudeCount + 1) * (latitudeCount + 1);
+    mesh.triangleCount = longitudeSlices * (latitudeSlices - 1) * 2;
+    mesh.vertexCount = (longitudeSlices + 1) * (latitudeSlices + 1);
 
-    mesh.vertices = (float*)MemAlloc(mesh.vertexCount * 3 * sizeof(float));
-    mesh.colors = (unsigned char*)MemAlloc(mesh.vertexCount * 4 * sizeof(unsigned char));
-    mesh.indices = (unsigned short*)MemAlloc(mesh.triangleCount * 3 * sizeof(unsigned short));
+    mesh.vertices = (float *)MemAlloc(mesh.vertexCount * 3 * sizeof(float));
+    mesh.colors = (unsigned char *)MemAlloc(mesh.vertexCount * 4 * sizeof(unsigned char));
+    mesh.indices = (unsigned short *)MemAlloc(mesh.triangleCount * 3 * sizeof(unsigned short));
+    mesh.normals = (float *)MemAlloc(mesh.vertexCount * 3 * sizeof(float));
 
-    mesh.normals = (float*)MemAlloc(mesh.vertexCount * 3 * sizeof(float));
-    memset(mesh.normals, 0, mesh.vertexCount * 3 * sizeof(float));
-
+    // TODO
     mesh.texcoords = (float*)MemAlloc(mesh.vertexCount * 2 * sizeof(float));
     memset(mesh.texcoords, 0, mesh.vertexCount * 2 * sizeof(float));
 
-    float x, y, z, xy;                              // vertex position
-    float nx, ny, nz, lengthInv = 1.0f / radius;    // vertex normal
-    float s, t;                                     // vertex texCoord
+    const float lengthInv = 1.0f / radius;
+    const float longitudeStep = 2 * PI / longitudeSlices;
+    const float latitudeStep = PI / latitudeSlices;
 
-    float longitudeStep = 2 * PI / longitudeCount;
-    float latitudeStep = PI / latitudeCount;
-    float longitudeAngle, latitudeAngle;
+    for (int i = 0, v = 0; i <= latitudeSlices; i++) {
 
-    int vertex = 0;
+        float latitudeAngle = PI / 2 - i * latitudeStep;
+        float latitudeCos = cosf(latitudeAngle);
+        float latitudeSin = sinf(latitudeAngle);
+        float z = radius * latitudeSin;
 
-    for(int i = 0; i <= latitudeCount; ++i)
-    {
-        latitudeAngle = PI / 2 - i * latitudeStep;        // starting from pi/2 to -pi/2
-        xy = radius * cosf(latitudeAngle);             // r * cos(u)
-        z = radius * sinf(latitudeAngle);              // r * sin(u)
+        for (int j = 0; j <= longitudeSlices; j++, v++) {
 
-        for(int j = 0; j <= longitudeCount; ++j)
-        {
-            longitudeAngle = j * longitudeStep;           // starting from 0 to 2pi
-            x = xy * cosf(longitudeAngle);             // r * cos(u) * cos(v)
-            y = xy * sinf(longitudeAngle);             // r * cos(u) * sin(v)
+            float longitudeAngle = j * longitudeStep;
+            float longitudeCos = cosf(longitudeAngle);
+            float longitudeSin = sinf(longitudeAngle);
+
+            float x = radius * latitudeCos * longitudeCos;
+            float y = radius * latitudeCos * longitudeSin;
 
             float noise = stb_perlin_fbm_noise3(x / scale, y / scale, z / scale, lacunarity, gain, octaves);
 
-            float offsetX = noise * cosf(latitudeAngle) * cosf(latitudeAngle);
-            float offsetY = noise * cosf(latitudeAngle) * sinf(latitudeAngle);
-            float offsetZ = noise * sinf(latitudeAngle);
+            float offsetX = noise * latitudeCos * longitudeCos;
+            float offsetY = noise * latitudeCos * longitudeSin;
+            float offsetZ = noise * latitudeSin;
 
-            mesh.vertices[vertex*3 + 0] = x + offsetX;
-            mesh.vertices[vertex*3 + 1] = y + offsetY;
-            mesh.vertices[vertex*3 + 2] = z + offsetZ;
+            mesh.vertices[v * 3 + 0] = x + offsetX;
+            mesh.vertices[v * 3 + 1] = y + offsetY;
+            mesh.vertices[v * 3 + 2] = z + offsetZ;
 
-            Color color = DARKBLUE;
-            if (noise > 0.5)
-                color = DARKGRAY;
-            else if (noise > 0.3)
-                color = DARKBROWN;
-            else if (noise > 0)
-                color = BROWN;
-            else if (noise > -0.2)
-                color = SKYBLUE;
+            mesh.normals[v * 3 + 0] = mesh.vertices[v * 3 + 0] * lengthInv;
+            mesh.normals[v * 3 + 1] = mesh.vertices[v * 3 + 1] * lengthInv;
+            mesh.normals[v * 3 + 2] = mesh.vertices[v * 3 + 2] * lengthInv;
 
-            mesh.colors[vertex*4 + 0] = color.r;
-            mesh.colors[vertex*4 + 1] = color.g;
-            mesh.colors[vertex*4 + 2] = color.b;
-            mesh.colors[vertex*4 + 3] = color.a;
+            Color color = heightToColor(noise);
 
-            vertex++;
+            mesh.colors[v * 4 + 0] = color.r;
+            mesh.colors[v * 4 + 1] = color.g;
+            mesh.colors[v * 4 + 2] = color.b;
+            mesh.colors[v * 4 + 3] = color.a;
         }
     }
 
-    int index = 0;
+    for (int i = 0, v = 0; i < latitudeSlices; i++) {
 
-    int k1, k2;
-    for(int i = 0; i < latitudeCount; ++i)
-    {
-        k1 = i * (longitudeCount + 1);     // beginning of current latitude
-        k2 = k1 + longitudeCount + 1;      // beginning of next latitude
+        int k1 = i * (longitudeSlices + 1);
+        int k2 = k1 + longitudeSlices + 1;
 
-        for(int j = 0; j < longitudeCount; ++j, ++k1, ++k2)
-        {
-            // 2 triangles per longitude excluding first and last latitudes
+        for (int j = 0; j < longitudeSlices; j++, k1++, k2++) {
+
             // k1 => k2 => k1+1
-            if(i != 0)
-            {
-                mesh.indices[index++] = k1;
-                mesh.indices[index++] = k2;
-                mesh.indices[index++] = k1 + 1;
+            if (i != 0) {
+                mesh.indices[v++] = k1;
+                mesh.indices[v++] = k2;
+                mesh.indices[v++] = k1 + 1;
             }
 
             // k1+1 => k2 => k2+1
-            if(i != (latitudeCount-1))
-            {
-                mesh.indices[index++] = k1 + 1;
-                mesh.indices[index++] = k2;
-                mesh.indices[index++] = k2 + 1;
+            if (i != latitudeSlices - 1) {
+                mesh.indices[v++] = k1 + 1;
+                mesh.indices[v++] = k2;
+                mesh.indices[v++] = k2 + 1;
             }
         }
     }
@@ -128,12 +127,12 @@ int main(int argc, char **argv)
     SetTargetFPS(60);
 
     float radius = 10;
-    int scale = 4;
+    int scale = 10;
     float lacunarity = 2;
     float gain = 0.5;
-    int octaves = 5;
+    int octaves = 6;
 
-    Mesh mesh = GenerateMesh(radius, scale, lacunarity, gain, octaves);
+    Mesh mesh = GenerateMesh(128, 128, radius, scale, lacunarity, gain, octaves);
     Material material = LoadMaterialDefault();
 
     while (!WindowShouldClose()) {
