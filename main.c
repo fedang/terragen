@@ -104,6 +104,8 @@ static Mesh GenerateMesh(int longitudeSlices, int latitudeSlices, float radius, 
         }
     }
 
+    //ExportMesh(mesh, "mesh.obj");
+
     UploadMesh(&mesh, false);
 
     return mesh;
@@ -125,9 +127,10 @@ int main(int argc, char **argv)
     camera.projection = CAMERA_PERSPECTIVE;
 
     SetTargetFPS(60);
+    SetExitKey(KEY_NULL);
 
     float radius = 10;
-    int scale = 10;
+    float scale = 10;
     float lacunarity = 2;
     float gain = 0.5;
     int octaves = 6;
@@ -135,8 +138,16 @@ int main(int argc, char **argv)
     Mesh mesh = GenerateMesh(128, 128, radius, scale, lacunarity, gain, octaves);
     Material material = LoadMaterialDefault();
 
+    bool menu = false;
+
     while (!WindowShouldClose()) {
         UpdateCamera(&camera, CAMERA_ORBITAL);
+
+        screenWidth = GetScreenWidth();
+        screenHeight = GetScreenHeight();
+
+        if (IsKeyPressed(KEY_ESCAPE))
+            menu = !menu;
 
         BeginDrawing();
 
@@ -149,7 +160,40 @@ int main(int argc, char **argv)
 
             EndMode3D();
 
-            DrawFPS(10, 10);
+            if (menu) {
+                Color infoColor = Fade(LIGHTGRAY, 0.6f);
+
+                int paddingX = screenWidth / 8;
+                int paddingY = screenHeight / 8;
+
+                DrawRectangle(paddingX, paddingY, screenWidth - 2 * paddingX, screenHeight - 2 * paddingY, infoColor);
+
+                float fontSize = Clamp(screenWidth / 100.0 * 3, 12, 40);
+
+                DrawText("perlin noise", paddingX * 2, paddingY * 2, fontSize * 1.2, BLACK);
+                int spacing = fontSize * 2;
+
+                DrawText(TextFormat("scale: %f", scale), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+
+                DrawText(TextFormat("lacunarity: %f", lacunarity), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+
+                DrawText(TextFormat("gain: %f", gain), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+
+                DrawText(TextFormat("octaves: %d", octaves), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize * 2;
+
+                DrawText(TextFormat("window", octaves), paddingX * 2, paddingY * 2 + spacing, fontSize * 1.2, BLACK);
+                spacing += fontSize * 2;
+
+                DrawText(TextFormat("width: %d", screenWidth), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+
+                DrawText(TextFormat("height: %d", screenHeight), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+            }
 
         EndDrawing();
     }
