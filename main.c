@@ -2,20 +2,24 @@
 #include <raymath.h>
 #include <stdlib.h>
 #include <string.h>
+#include <rlgl.h>
 
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
 
 static Color heightToColor(float noise)
 {
-    if (noise > 0.45)
+    if (noise > 0.5)
         return DARKGRAY;
 
-    if (noise > 0.25)
+    if (noise > 0.3)
         return DARKBROWN;
 
-    if (noise > 0)
+    if (noise > 0.15)
         return BROWN;
+
+    if (noise > 0)
+        return DARKGREEN;
 
     if (noise > -0.2)
         return SKYBLUE;
@@ -111,12 +115,42 @@ static Mesh GenerateMesh(int longitudeSlices, int latitudeSlices, float radius, 
     return mesh;
 }
 
+static RenderTexture2D LoadShadowmapTexture(int width, int height)
+{
+    RenderTexture2D target = { 0 };
+
+    target.id = rlLoadFramebuffer(width, height);
+    target.texture.width = width;
+    target.texture.height = height;
+
+    if (target.id > 0) {
+        rlEnableFramebuffer(target.id);
+
+        target.depth.id = rlLoadTextureDepth(width, height, false);
+        target.depth.width = width;
+        target.depth.height = height;
+        target.depth.format = 24;
+        target.depth.mipmaps = 1;
+
+        rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+
+        if (rlFramebufferComplete(target.id))
+            TRACELOG(LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", target.id);
+
+        rlDisableFramebuffer();
+    }
+    else
+        TRACELOG(LOG_WARNING, "FBO: Framebuffer object can not be created");
+
+    return target;
+}
+
 int main(int argc, char **argv)
 {
     int screenWidth = 1000;
     int screenHeight = 800;
 
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
     InitWindow(screenWidth, screenHeight, "terragen");
 
     Camera camera = { 0 };
@@ -129,8 +163,8 @@ int main(int argc, char **argv)
     SetTargetFPS(60);
     SetExitKey(KEY_NULL);
 
-    int longitudeSlices = 128;
-    int latitudeSlices = 128;
+    int longitudeSlices = 200;
+    int latitudeSlices = 200;
 
     float radius = 10;
     float scale = 4;
@@ -138,28 +172,94 @@ int main(int argc, char **argv)
     float gain = 0.5;
     int octaves = 6;
 
+    Shader shadowShader = LoadShader("shadowmap.vs", "shadowmap.fs");
+    shadowShader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(shadowShader, "viewPos");
+
+    Vector3 lightDir = Vector3Normalize((Vector3){ 0.35f, -1.0f, -0.35f });
+    int lightDirLoc = GetShaderLocation(shadowShader, "lightDir");
+    SetShaderValue(shadowShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
+
+    Color lightColor = { 237, 221, 128, 255 };
+    Vector4 lightColorNormalized = ColorNormalize(lightColor);
+    int lightColLoc = GetShaderLocation(shadowShader, "lightColor");
+    SetShaderValue(shadowShader, lightColLoc, &lightColorNormalized, SHADER_UNIFORM_VEC4);
+
+    int ambientLoc = GetShaderLocation(shadowShader, "ambient");
+    float ambient[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
+    SetShaderValue(shadowShader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
+
+    int shadowMapResolution = 1024;
+    SetShaderValue(shadowShader, GetShaderLocation(shadowShader, "shadowMapResolution"), &shadowMapResolution, SHADER_UNIFORM_INT);
+
+    int lightVPLoc = GetShaderLocation(shadowShader, "lightVP");
+    int shadowMapLoc = GetShaderLocation(shadowShader, "shadowMap");
+
+    // TODO: Use fibonacci/cube sphere instead of UV
     Mesh mesh = GenerateMesh(longitudeSlices, latitudeSlices, radius, scale, lacunarity, gain, octaves);
+    Matrix meshTransform = MatrixIdentity();
     Material material = LoadMaterialDefault();
+    material.shader = shadowShader;
+
+    RenderTexture2D shadowMap = LoadShadowmapTexture(shadowMapResolution, shadowMapResolution);
+
+    Camera3D lightCam = { 0 };
+    lightCam.position = Vector3Scale(lightDir, -15.0f);
+    lightCam.target = Vector3Zero();
+    lightCam.projection = CAMERA_ORTHOGRAPHIC;
+    lightCam.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    lightCam.fovy = 20.0f;
 
     bool menu = false;
 
     while (!WindowShouldClose()) {
-        UpdateCamera(&camera, CAMERA_ORBITAL);
-
         screenWidth = GetScreenWidth();
         screenHeight = GetScreenHeight();
 
+        // Update cameras
+        Vector3 cameraPos = camera.position;
+        SetShaderValue(shadowShader, shadowShader.locs[SHADER_LOC_VECTOR_VIEW], &cameraPos, SHADER_UNIFORM_VEC3);
+        UpdateCamera(&camera, CAMERA_ORBITAL);
+
+        // Update menu
         if (IsKeyPressed(KEY_ESCAPE))
             menu = !menu;
 
+        // Update light
+        lightDir = Vector3Normalize(lightDir);
+        lightCam.position = Vector3Scale(lightDir, -15.0f);
+        SetShaderValue(shadowShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
+
         BeginDrawing();
+
+            Matrix lightView;
+            Matrix lightProj;
+
+            BeginTextureMode(shadowMap);
+                ClearBackground(WHITE);
+
+                BeginMode3D(lightCam);
+
+                    lightView = rlGetMatrixModelview();
+                    lightProj = rlGetMatrixProjection();
+                    DrawMesh(mesh, material, meshTransform);
+
+                EndMode3D();
+            EndTextureMode();
+
+            Matrix lightViewProj = MatrixMultiply(lightView, lightProj);
+            SetShaderValueMatrix(shadowShader, lightVPLoc, lightViewProj);
+
+            rlEnableShader(shadowShader.id);
+            int slot = 10;
+            rlActiveTextureSlot(slot);
+            rlEnableTexture(shadowMap.depth.id);
+            rlSetUniform(shadowMapLoc, &slot, SHADER_UNIFORM_INT, 1);
 
             ClearBackground(RAYWHITE);
 
             BeginMode3D(camera);
 
-                Matrix transform = MatrixIdentity();
-                DrawMesh(mesh, material, transform);
+                DrawMesh(mesh, material, meshTransform);
 
             EndMode3D();
 
@@ -195,6 +295,9 @@ int main(int argc, char **argv)
                 spacing += fontSize;
 
                 DrawText(TextFormat("height: %d", screenHeight), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+
+                DrawText(TextFormat("shadowmap resolution: %d", shadowMapResolution), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
                 spacing += fontSize * 2;
 
                 DrawText("mesh", paddingX * 2, paddingY * 2 + spacing, fontSize * 1.2, BLACK);
@@ -206,15 +309,18 @@ int main(int argc, char **argv)
                 DrawText(TextFormat("vertices: %d", mesh.vertexCount), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
                 spacing += fontSize;
 
-                DrawText(TextFormat("longitude: %d", longitudeSlices), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                DrawText(TextFormat("longitude slices: %d", longitudeSlices), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
                 spacing += fontSize;
 
-                DrawText(TextFormat("latitude: %d", latitudeSlices), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                DrawText(TextFormat("latitude slices: %d", latitudeSlices), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
                 spacing += fontSize;
             }
 
         EndDrawing();
     }
+
+    if (shadowMap.id > 0)
+        rlUnloadFramebuffer(shadowMap.id);
 
     UnloadMesh(mesh);
     UnloadMaterial(material);
