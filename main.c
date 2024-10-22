@@ -1,10 +1,118 @@
 #include <raylib.h>
 #include <raymath.h>
 #include <stdlib.h>
-#include "rlgl.h"
+#include <string.h>
 
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
+
+static Mesh GenerateMesh(float radius, float scale, float lacunarity, float gain, int octaves)
+{
+    const int longitudeCount = 100;
+    const int latitudeCount = 100;
+
+    Mesh mesh = { 0 };
+    mesh.triangleCount = longitudeCount * (latitudeCount - 1) * 2;
+    mesh.vertexCount = (longitudeCount + 1) * (latitudeCount + 1);
+
+    mesh.vertices = (float*)MemAlloc(mesh.vertexCount * 3 * sizeof(float));
+    mesh.colors = (unsigned char*)MemAlloc(mesh.vertexCount * 4 * sizeof(unsigned char));
+    mesh.indices = (unsigned short*)MemAlloc(mesh.triangleCount * 3 * sizeof(unsigned short));
+
+    mesh.normals = (float*)MemAlloc(mesh.vertexCount * 3 * sizeof(float));
+    memset(mesh.normals, 0, mesh.vertexCount * 3 * sizeof(float));
+
+    mesh.texcoords = (float*)MemAlloc(mesh.vertexCount * 2 * sizeof(float));
+    memset(mesh.texcoords, 0, mesh.vertexCount * 2 * sizeof(float));
+
+    float x, y, z, xy;                              // vertex position
+    float nx, ny, nz, lengthInv = 1.0f / radius;    // vertex normal
+    float s, t;                                     // vertex texCoord
+
+    float longitudeStep = 2 * PI / longitudeCount;
+    float latitudeStep = PI / latitudeCount;
+    float longitudeAngle, latitudeAngle;
+
+    int vertex = 0;
+
+    for(int i = 0; i <= latitudeCount; ++i)
+    {
+        latitudeAngle = PI / 2 - i * latitudeStep;        // starting from pi/2 to -pi/2
+        xy = radius * cosf(latitudeAngle);             // r * cos(u)
+        z = radius * sinf(latitudeAngle);              // r * sin(u)
+
+        // add (longitudeCount+1) vertices per latitude
+        // first and last vertices have same position and normal, but different tex coords
+        for(int j = 0; j <= longitudeCount; ++j)
+        {
+            longitudeAngle = j * longitudeStep;           // starting from 0 to 2pi
+
+            // vertex position (x, y, z)
+            x = xy * cosf(longitudeAngle);             // r * cos(u) * cos(v)
+            y = xy * sinf(longitudeAngle);             // r * cos(u) * sin(v)
+
+            float noise = stb_perlin_fbm_noise3(x, y, z, lacunarity, gain, octaves);
+
+            float offsetX = noise * cosf(latitudeAngle) * cosf(latitudeAngle);
+            float offsetY = noise * cosf(latitudeAngle) * sinf(latitudeAngle);
+            float offsetZ = noise * sinf(latitudeAngle);
+
+            mesh.vertices[vertex*3 + 0] = x + offsetX;
+            mesh.vertices[vertex*3 + 1] = y + offsetY;
+            mesh.vertices[vertex*3 + 2] = z + offsetZ;
+
+            Color color = DARKBLUE;
+            if (noise > 0.4)
+                color = DARKGRAY;
+            else if (noise > 0.3)
+                color = DARKBROWN;
+            else if (noise > 0.2)
+                color = BROWN;
+            else if (noise > 0.1)
+                color = SKYBLUE;
+
+            mesh.colors[vertex*4 + 0] = color.r;
+            mesh.colors[vertex*4 + 1] = color.g;
+            mesh.colors[vertex*4 + 2] = color.b;
+            mesh.colors[vertex*4 + 3] = color.a;
+
+            vertex++;
+        }
+    }
+
+    int index = 0;
+
+    int k1, k2;
+    for(int i = 0; i < latitudeCount; ++i)
+    {
+        k1 = i * (longitudeCount + 1);     // beginning of current latitude
+        k2 = k1 + longitudeCount + 1;      // beginning of next latitude
+
+        for(int j = 0; j < longitudeCount; ++j, ++k1, ++k2)
+        {
+            // 2 triangles per longitude excluding first and last latitudes
+            // k1 => k2 => k1+1
+            if(i != 0)
+            {
+                mesh.indices[index++] = k1;
+                mesh.indices[index++] = k2;
+                mesh.indices[index++] = k1 + 1;
+            }
+
+            // k1+1 => k2 => k2+1
+            if(i != (latitudeCount-1))
+            {
+                mesh.indices[index++] = k1 + 1;
+                mesh.indices[index++] = k2;
+                mesh.indices[index++] = k2 + 1;
+            }
+        }
+    }
+
+    UploadMesh(&mesh, false);
+
+    return mesh;
+}
 
 int main(int argc, char **argv)
 {
@@ -22,8 +130,10 @@ int main(int argc, char **argv)
 
     SetTargetFPS(60);
 
-    while (!WindowShouldClose()) {
+    Mesh mesh = GenerateMesh(10, 1, 2, 0.5, 4);
+    Material material = LoadMaterialDefault();
 
+    while (!WindowShouldClose()) {
         UpdateCamera(&camera, CAMERA_ORBITAL);
 
         BeginDrawing();
@@ -32,87 +142,8 @@ int main(int argc, char **argv)
 
             BeginMode3D(camera);
 
-                Vector3 centerPos = { 0, 0, 0 };
-                float radius = 10;
-                int rings = 100;
-                int slices = 100;
-
-                rlPushMatrix();
-                    rlTranslatef(centerPos.x, centerPos.y, centerPos.z);
-                    rlScalef(radius, radius, radius);
-
-                    rlBegin(RL_TRIANGLES);
-
-                        float ringangle = DEG2RAD*(180.0f/(rings + 1)); // Angle between latitudinal parallels
-                        float sliceangle = DEG2RAD*(360.0f/slices); // Angle between longitudinal meridians
-
-                        float cosring = cosf(ringangle);
-                        float sinring = sinf(ringangle);
-                        float cosslice = cosf(sliceangle);
-                        float sinslice = sinf(sliceangle);
-
-                        Vector3 vertices[4] = { 0 }; // Required to store face vertices
-                        vertices[2] = (Vector3){ 0, 1, 0 };
-                        vertices[3] = (Vector3){ sinring, cosring, 0 };
-
-                        for (int i = 0; i < rings + 1; i++) {
-                            for (int j = 0; j < slices; j++) {
-                                vertices[0] = vertices[2]; // Rotate around y axis to set up vertices for next face
-                                vertices[1] = vertices[3];
-                                vertices[2] = (Vector3){ cosslice*vertices[2].x - sinslice*vertices[2].z, vertices[2].y, sinslice*vertices[2].x + cosslice*vertices[2].z }; // Rotation matrix around y axis
-                                vertices[3] = (Vector3){ cosslice*vertices[3].x - sinslice*vertices[3].z, vertices[3].y, sinslice*vertices[3].x + cosslice*vertices[3].z };
-
-                                float offset[4][3];
-                                Color color[4];
-
-                                for (int i = 0; i < 4; i++) {
-                                    float noise = stb_perlin_fbm_noise3(vertices[i].x, vertices[i].y, vertices[i].z, 2, 0.5, 4);
-                                    noise = Remap(noise, -1, 1, 0, 0.5);
-
-                                    offset[i][0] = noise * sinring * cosslice;
-                                    offset[i][1] = noise * sinring * sinslice;
-                                    offset[i][2] = noise * cosring;
-
-                                    if (noise > 0.4)
-                                        color[i] = DARKGRAY;
-                                    else if (noise > 0.3)
-                                        color[i] = DARKBROWN;
-                                    else if (noise > 0.2)
-                                        color[i] = BROWN;
-                                    else if (noise > 0.1)
-                                        color[i] = SKYBLUE;
-                                    else
-                                        color[i] = DARKBLUE;
-                                }
-
-                                // Triangle 1
-
-                                rlColor4ub(color[0].r, color[0].g, color[0].b, color[0].a);
-                                rlVertex3f(vertices[0].x + offset[0][0], vertices[0].y + offset[0][1], vertices[0].z + offset[0][2]);
-
-                                rlColor4ub(color[3].r, color[3].g, color[3].b, color[3].a);
-                                rlVertex3f(vertices[3].x + offset[3][0], vertices[3].y + offset[3][1], vertices[3].z + offset[3][2]);
-
-                                rlColor4ub(color[1].r, color[1].g, color[1].b, color[1].a);
-                                rlVertex3f(vertices[1].x + offset[1][0], vertices[1].y + offset[1][1], vertices[1].z + offset[1][2]);
-
-                                // Triangle 2
-
-                                rlColor4ub(color[0].r, color[0].g, color[0].b, color[0].a);
-                                rlVertex3f(vertices[0].x + offset[0][0], vertices[0].y + offset[0][1], vertices[0].z + offset[0][2]);
-
-                                rlColor4ub(color[2].r, color[2].g, color[2].b, color[2].a);
-                                rlVertex3f(vertices[2].x + offset[2][0], vertices[2].y + offset[2][1], vertices[2].z + offset[2][2]);
-
-                                rlColor4ub(color[3].r, color[3].g, color[3].b, color[3].a);
-                                rlVertex3f(vertices[3].x + offset[3][0], vertices[3].y + offset[3][1], vertices[3].z + offset[3][2]);
-                            }
-
-                            vertices[2] = vertices[3]; // Rotate around z axis to set up  starting vertices for next ring
-                            vertices[3] = (Vector3){ cosring*vertices[3].x + sinring*vertices[3].y, -sinring*vertices[3].x + cosring*vertices[3].y, vertices[3].z }; // Rotation matrix around z axis
-                        }
-                    rlEnd();
-                rlPopMatrix();
+                Matrix transform = MatrixIdentity();
+                DrawMesh(mesh, material, transform);
 
             EndMode3D();
 
@@ -120,6 +151,9 @@ int main(int argc, char **argv)
 
         EndDrawing();
     }
+
+    UnloadMesh(mesh);
+    UnloadMaterial(material);
 
     CloseWindow();
 
