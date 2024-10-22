@@ -129,13 +129,16 @@ int main(int argc, char **argv)
     SetTargetFPS(60);
     SetExitKey(KEY_NULL);
 
+    int longitudeSlices = 128;
+    int latitudeSlices = 128;
+
     float radius = 10;
-    float scale = 10;
+    float scale = 4;
     float lacunarity = 2;
     float gain = 0.5;
     int octaves = 6;
 
-    Mesh mesh = GenerateMesh(128, 128, radius, scale, lacunarity, gain, octaves);
+    Mesh mesh = GenerateMesh(longitudeSlices, latitudeSlices, radius, scale, lacunarity, gain, octaves);
     Material material = LoadMaterialDefault();
 
     bool menu = false;
@@ -168,7 +171,7 @@ int main(int argc, char **argv)
 
                 DrawRectangle(paddingX, paddingY, screenWidth - 2 * paddingX, screenHeight - 2 * paddingY, infoColor);
 
-                float fontSize = Clamp(screenWidth / 100.0 * 3, 12, 40);
+                float fontSize = Clamp(screenHeight / 100.0 * 3.2, 16, 40);
 
                 DrawText("perlin noise", paddingX * 2, paddingY * 2, fontSize * 1.2, BLACK);
                 int spacing = fontSize * 2;
@@ -185,13 +188,28 @@ int main(int argc, char **argv)
                 DrawText(TextFormat("octaves: %d", octaves), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
                 spacing += fontSize * 2;
 
-                DrawText(TextFormat("window", octaves), paddingX * 2, paddingY * 2 + spacing, fontSize * 1.2, BLACK);
+                DrawText("window", paddingX * 2, paddingY * 2 + spacing, fontSize * 1.2, BLACK);
                 spacing += fontSize * 2;
 
                 DrawText(TextFormat("width: %d", screenWidth), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
                 spacing += fontSize;
 
                 DrawText(TextFormat("height: %d", screenHeight), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize * 2;
+
+                DrawText("mesh", paddingX * 2, paddingY * 2 + spacing, fontSize * 1.2, BLACK);
+                spacing += fontSize * 2;
+
+                DrawText(TextFormat("triangles: %d", mesh.triangleCount), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+
+                DrawText(TextFormat("vertices: %d", mesh.vertexCount), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+
+                DrawText(TextFormat("longitude: %d", longitudeSlices), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
+                spacing += fontSize;
+
+                DrawText(TextFormat("latitude: %d", latitudeSlices), paddingX * 2, paddingY * 2 + spacing, fontSize, BLACK);
                 spacing += fontSize;
             }
 
