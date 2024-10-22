@@ -8,8 +8,8 @@
 
 static Mesh GenerateMesh(float radius, float scale, float lacunarity, float gain, int octaves)
 {
-    const int longitudeCount = 100;
-    const int latitudeCount = 100;
+    const int longitudeCount = 50;
+    const int latitudeCount = 50;
 
     Mesh mesh = { 0 };
     mesh.triangleCount = longitudeCount * (latitudeCount - 1) * 2;
@@ -41,17 +41,13 @@ static Mesh GenerateMesh(float radius, float scale, float lacunarity, float gain
         xy = radius * cosf(latitudeAngle);             // r * cos(u)
         z = radius * sinf(latitudeAngle);              // r * sin(u)
 
-        // add (longitudeCount+1) vertices per latitude
-        // first and last vertices have same position and normal, but different tex coords
         for(int j = 0; j <= longitudeCount; ++j)
         {
             longitudeAngle = j * longitudeStep;           // starting from 0 to 2pi
-
-            // vertex position (x, y, z)
             x = xy * cosf(longitudeAngle);             // r * cos(u) * cos(v)
             y = xy * sinf(longitudeAngle);             // r * cos(u) * sin(v)
 
-            float noise = stb_perlin_fbm_noise3(x, y, z, lacunarity, gain, octaves);
+            float noise = stb_perlin_fbm_noise3(x / scale, y / scale, z / scale, lacunarity, gain, octaves);
 
             float offsetX = noise * cosf(latitudeAngle) * cosf(latitudeAngle);
             float offsetY = noise * cosf(latitudeAngle) * sinf(latitudeAngle);
@@ -62,13 +58,13 @@ static Mesh GenerateMesh(float radius, float scale, float lacunarity, float gain
             mesh.vertices[vertex*3 + 2] = z + offsetZ;
 
             Color color = DARKBLUE;
-            if (noise > 0.4)
+            if (noise > 0.5)
                 color = DARKGRAY;
             else if (noise > 0.3)
                 color = DARKBROWN;
-            else if (noise > 0.2)
+            else if (noise > 0)
                 color = BROWN;
-            else if (noise > 0.1)
+            else if (noise > -0.2)
                 color = SKYBLUE;
 
             mesh.colors[vertex*4 + 0] = color.r;
@@ -116,9 +112,10 @@ static Mesh GenerateMesh(float radius, float scale, float lacunarity, float gain
 
 int main(int argc, char **argv)
 {
-    const int screenWidth = 1000;
-    const int screenHeight = 800;
+    int screenWidth = 1000;
+    int screenHeight = 800;
 
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(screenWidth, screenHeight, "terragen");
 
     Camera camera = { 0 };
@@ -130,7 +127,13 @@ int main(int argc, char **argv)
 
     SetTargetFPS(60);
 
-    Mesh mesh = GenerateMesh(10, 1, 2, 0.5, 4);
+    float radius = 10;
+    int scale = 4;
+    float lacunarity = 2;
+    float gain = 0.5;
+    int octaves = 5;
+
+    Mesh mesh = GenerateMesh(radius, scale, lacunarity, gain, octaves);
     Material material = LoadMaterialDefault();
 
     while (!WindowShouldClose()) {
